@@ -1,15 +1,16 @@
 function downloadVideo(){
 
-let url=document.getElementById("videoURL").value
+let url = document.getElementById("videoURL").value;
 
-fetch("/download?url="+encodeURIComponent(url))
+fetch("/download?url=" + encodeURIComponent(url))
+.then(res => res.json())
+.then(data => {
 
-.then(res=>res.json())
-
-.then(data=>{
-
-console.log(data)
+document.getElementById("result").innerText = JSON.stringify(data);
 
 })
+.catch(error => {
+console.error(error);
+});
 
 }
