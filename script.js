@@ -1,16 +1,19 @@
-function downloadVideo(){
+function downloadVideo() {
 
 let url = document.getElementById("videoURL").value;
 
-fetch("/download?url=" + encodeURIComponent(url))
-.then(res => res.json())
-.then(data => {
+fetch("/api/download?url=" + encodeURIComponent(url))
+.then(function(res){
+return res.json();
+})
+.then(function(data){
 
-document.getElementById("result").innerText = JSON.stringify(data);
+document.getElementById("result").innerText = data.message + " : " + data.url;
 
 })
-.catch(error => {
-console.error(error);
+.catch(function(error){
+document.getElementById("result").innerText = "Error connecting API";
+console.log(error);
 });
 
 }
