@@ -8,7 +8,7 @@ import time
 import re
 
 app = Flask(__name__)
-CORS(app, origins=["https://theneofly.in",
+CORS(app, origins=["http://theneofly.in", "https://theneofly.in",
     "https://www.theneofly.in"])
 
 DOWNLOAD_DIR = "/tmp/neofly_downloads"
