@@ -1,0 +1,270 @@
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
+import yt_dlp
+import os
+import uuid
+import threading
+import time
+import re
+
+app = Flask(__name__)
+CORS(app, origins=[
+    "http://theneofly.in",
+    "https://theneofly.in",
+    "https://www.theneofly.in"
+])
+
+DOWNLOAD_DIR = "/tmp/neofly_downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# ── Auto cleanup files older than 10 mins ─────────────
+def cleanup_old_files():
+    while True:
+        time.sleep(300)
+        now = time.time()
+        for f in os.listdir(DOWNLOAD_DIR):
+            fpath = os.path.join(DOWNLOAD_DIR, f)
+            if os.path.isfile(fpath) and now - os.path.getmtime(fpath) > 600:
+                os.remove(fpath)
+
+threading.Thread(target=cleanup_old_files, daemon=True).start()
+
+# ── Supported platforms ────────────────────────────────
+SUPPORTED_PLATFORMS = {
+    "facebook":   r"(https?://)?(www\.)?(facebook\.com|fb\.watch|fb\.com)/.*",
+    "instagram":  r"(https?://)?(www\.)?instagram\.com/(p|reel|tv|videos|stories)/.*",
+    "youtube":    r"(https?://)?(www\.)?(youtube\.com/(watch|shorts|embed)|youtu\.be)/.*",
+    "twitter":    r"(https?://)?(www\.)?(twitter\.com|x\.com)/.*/status/.*",
+    "tiktok":     r"(https?://)?(www\.|vm\.)?tiktok\.com/.*",
+    "pinterest":  r"(https?://)?(www\.)?pinterest\.(com|co\.uk|in)/pin/.*",
+    "reddit":     r"(https?://)?(www\.|old\.)?reddit\.com/r/.*/comments/.*",
+    "vimeo":      r"(https?://)?(www\.)?vimeo\.com/.*",
+    "dailymotion":r"(https?://)?(www\.)?dailymotion\.com/video/.*",
+    "linkedin":   r"(https?://)?(www\.)?linkedin\.com/posts/.*",
+    "snapchat":   r"(https?://)?(www\.)?snapchat\.com/spotlight/.*",
+}
+
+def is_valid_url(url):
+    for pattern in SUPPORTED_PLATFORMS.values():
+        if re.match(pattern, url, re.IGNORECASE):
+            return True
+    return False
+
+def get_platform(url):
+    url_lower = url.lower()
+    if "facebook.com" in url_lower or "fb.watch" in url_lower or "fb.com" in url_lower:
+        return "facebook"
+    elif "instagram.com" in url_lower:
+        return "instagram"
+    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+        return "youtube"
+    elif "twitter.com" in url_lower or "x.com" in url_lower:
+        return "twitter"
+    elif "tiktok.com" in url_lower:
+        return "tiktok"
+    elif "pinterest.com" in url_lower:
+        return "pinterest"
+    elif "reddit.com" in url_lower:
+        return "reddit"
+    elif "vimeo.com" in url_lower:
+        return "vimeo"
+    elif "dailymotion.com" in url_lower:
+        return "dailymotion"
+    elif "linkedin.com" in url_lower:
+        return "linkedin"
+    elif "snapchat.com" in url_lower:
+        return "snapchat"
+    return "unknown"
+
+def get_cookies():
+    path = "/etc/secrets/cookies.txt"
+    return path if os.path.exists(path) else None
+
+def get_ydl_opts_for_platform(platform):
+    """Return platform-specific yt-dlp options."""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extractor_args": {},
+    }
+    # TikTok — skip watermark
+    if platform == "tiktok":
+        opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
+    # YouTube — use android client to avoid bot detection
+    if platform == "youtube":
+        opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+    return opts
+
+
+@app.route("/", methods=["GET"])
+def index():
+    platforms = list(SUPPORTED_PLATFORMS.keys())
+    return jsonify({
+        "status": "NeoFly Downloader API",
+        "version": "3.0.0",
+        "supported_platforms": platforms
+    })
+
+
+@app.route("/api/info", methods=["POST"])
+def get_info():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid request body"}), 400
+
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+
+    if not is_valid_url(url):
+        supported = ", ".join(p.capitalize() for p in SUPPORTED_PLATFORMS.keys())
+        return jsonify({"error": f"Unsupported platform. We support: {supported}"}), 400
+
+    platform = get_platform(url)
+    ydl_opts = get_ydl_opts_for_platform(platform)
+    cookies = get_cookies()
+    if cookies:
+        ydl_opts["cookiefile"] = cookies
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        # Build quality options
+        seen_heights = set()
+        quality_options = []
+
+        if info.get("formats"):
+            for f in info["formats"]:
+                height = f.get("height")
+                vcodec = f.get("vcodec")
+                if not vcodec or vcodec == "none":
+                    continue
+                if not height or not isinstance(height, (int, float)):
+                    continue
+                height = int(height)
+                if height in seen_heights:
+                    continue
+                seen_heights.add(height)
+                quality_options.append({
+                    "format_id": str(height),
+                    "label": f"{height}p",
+                    "ext": "mp4",
+                    "filesize": f.get("filesize") or f.get("filesize_approx"),
+                    "has_audio": True,
+                })
+
+        quality_options.sort(key=lambda x: int(x["label"].replace("p", "")), reverse=True)
+        quality_options.insert(0, {
+            "format_id": "best",
+            "label": "Best Quality",
+            "ext": "mp4",
+            "filesize": None,
+            "has_audio": True,
+        })
+
+        return jsonify({
+            "title":     info.get("title", "Video"),
+            "thumbnail": info.get("thumbnail"),
+            "duration":  info.get("duration"),
+            "platform":  platform,
+            "uploader":  info.get("uploader") or info.get("channel"),
+            "formats":   quality_options,
+        })
+
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e).lower()
+        if "login" in msg or "private" in msg:
+            return jsonify({"error": "This video is private or requires login."}), 403
+        if "copyright" in msg:
+            return jsonify({"error": "This video is not available due to copyright restrictions."}), 403
+        return jsonify({"error": "Could not fetch video. Make sure the URL is correct and public."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+@app.route("/api/download", methods=["POST"])
+def download_video():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid request body"}), 400
+
+    url = data.get("url", "").strip()
+    format_id = data.get("format_id", "best")
+
+    if not url or not is_valid_url(url):
+        return jsonify({"error": "Invalid or unsupported URL"}), 400
+
+    platform = get_platform(url)
+    file_id = str(uuid.uuid4())
+    output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "outtmpl": output_template,
+        "merge_output_format": "mp4",
+    }
+
+    # Platform-specific opts
+    if platform == "tiktok":
+        ydl_opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
+    if platform == "youtube":
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+
+    cookies = get_cookies()
+    if cookies:
+        ydl_opts["cookiefile"] = cookies
+
+    # Format selection
+    if format_id == "best" or not format_id:
+        ydl_opts["format"] = "bestvideo+bestaudio/best"
+    else:
+        try:
+            height = int(format_id)
+            ydl_opts["format"] = (
+                f"bestvideo[height<={height}]+bestaudio"
+                f"/best[height<={height}]"
+                f"/bestvideo+bestaudio/best"
+            )
+        except ValueError:
+            ydl_opts["format"] = "bestvideo+bestaudio/best"
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "video")
+
+        downloaded = None
+        for f in os.listdir(DOWNLOAD_DIR):
+            if f.startswith(file_id):
+                downloaded = os.path.join(DOWNLOAD_DIR, f)
+                break
+
+        if not downloaded or not os.path.exists(downloaded):
+            return jsonify({"error": "Download failed. File not found."}), 500
+
+        safe_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')[:60]
+        ext = downloaded.rsplit(".", 1)[-1]
+        download_name = f"{safe_title}.{ext}"
+
+        return send_file(
+            downloaded,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="video/mp4"
+        )
+
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e).lower()
+        if "login" in msg or "private" in msg:
+            return jsonify({"error": "This video is private or requires login."}), 403
+        return jsonify({"error": "Download failed. Make sure the video is public."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
