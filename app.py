@@ -33,9 +33,9 @@ threading.Thread(target=cleanup_old_files, daemon=True).start()
 SUPPORTED_PLATFORMS = {
     "facebook":   r"(https?://)?(www\.)?(facebook\.com|fb\.watch|fb\.com)/.*",
     "instagram":  r"(https?://)?(www\.)?instagram\.com/(p|reel|tv|videos|stories)/.*",
-    "youtube":    r"(https?://)?(www\.)?(youtube\.com/(watch|shorts|embed)|youtu\.be)/.*",
-    "twitter":    r"(https?://)?(www\.)?(twitter\.com|x\.com)/.*/status/.*",
-    "tiktok":     r"(https?://)?(www\.|vm\.)?tiktok\.com/.*",
+    "youtube":    r"(https?://)?(www\.|m\.)?(youtube\.com/(watch|shorts|embed|live)|youtu\.be)/.*",
+    "twitter":    r"(https?://)?(www\.|mobile\.)?(twitter\.com|x\.com)/.*/status/.*",
+    "tiktok":     r"(https?://)?(www\.|vm\.|vt\.)?tiktok\.com/.*",
     "pinterest":  r"(https?://)?(www\.)?pinterest\.(com|co\.uk|in)/pin/.*",
     "reddit":     r"(https?://)?(www\.|old\.)?reddit\.com/r/.*/comments/.*",
     "vimeo":      r"(https?://)?(www\.)?vimeo\.com/.*",
@@ -56,7 +56,7 @@ def get_platform(url):
         return "facebook"
     elif "instagram.com" in url_lower:
         return "instagram"
-    elif "youtube.com" in url_lower or "youtu.be" in url_lower:
+    if "youtube.com" in url_lower or "youtu.be" in url_lower:
         return "youtube"
     elif "twitter.com" in url_lower or "x.com" in url_lower:
         return "twitter"
