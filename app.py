@@ -6,6 +6,7 @@ import uuid
 import threading
 import time
 import re
+import shutil
 
 app = Flask(__name__)
 CORS(app, origins=[
@@ -17,7 +18,6 @@ CORS(app, origins=[
 DOWNLOAD_DIR = "/tmp/neofly_downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ── Auto cleanup files older than 10 mins ─────────────
 def cleanup_old_files():
     while True:
         time.sleep(300)
@@ -29,7 +29,6 @@ def cleanup_old_files():
 
 threading.Thread(target=cleanup_old_files, daemon=True).start()
 
-# ── Supported platforms ────────────────────────────────
 SUPPORTED_PLATFORMS = {
     "facebook":    r"https?://(www\.)?(facebook\.com|fb\.watch|fb\.com)/.+",
     "instagram":   r"https?://(www\.)?instagram\.com/.+",
@@ -54,132 +53,130 @@ def get_platform(url):
     url_lower = url.lower()
     if "facebook.com" in url_lower or "fb.watch" in url_lower or "fb.com" in url_lower:
         return "facebook"
-    elif "instagram.com" in url_lower:
+    if "instagram.com" in url_lower:
         return "instagram"
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         return "youtube"
-    elif "twitter.com" in url_lower or "x.com" in url_lower:
+    if "twitter.com" in url_lower or "x.com" in url_lower:
         return "twitter"
-    elif "tiktok.com" in url_lower:
+    if "tiktok.com" in url_lower:
         return "tiktok"
-    elif "pinterest.com" in url_lower:
+    if "pinterest.com" in url_lower:
         return "pinterest"
-    elif "reddit.com" in url_lower:
+    if "reddit.com" in url_lower:
         return "reddit"
-    elif "vimeo.com" in url_lower:
+    if "vimeo.com" in url_lower:
         return "vimeo"
-    elif "dailymotion.com" in url_lower:
+    if "dailymotion.com" in url_lower:
         return "dailymotion"
-    elif "linkedin.com" in url_lower:
+    if "linkedin.com" in url_lower:
         return "linkedin"
-    elif "snapchat.com" in url_lower:
+    if "snapchat.com" in url_lower:
         return "snapchat"
     return "unknown"
 
 def get_youtube_cookies():
-    """Copy cookies from read-only secret to /tmp and return path."""
     secret_path = "/etc/secrets/cookies.txt"
     tmp_path    = "/tmp/youtube_cookies.txt"
     if not os.path.exists(secret_path) or os.path.getsize(secret_path) == 0:
         return None
     try:
-        import shutil
         shutil.copy2(secret_path, tmp_path)
         return tmp_path
     except Exception:
         return None
 
+def get_youtube_opts(with_cookies=True):
+    opts = {
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv_embedded", "web_creator", "android"],
+                "skip": ["hls", "dash"],
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+        },
+    }
+    if with_cookies:
+        cookies = get_youtube_cookies()
+        if cookies:
+            opts["cookiefile"] = cookies
+    return opts
+
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "status": "NeoFly Downloader API",
+        "version": "3.0.0",
+        "supported_platforms": list(SUPPORTED_PLATFORMS.keys())
+    })
+
 @app.route("/check-cookies", methods=["GET"])
 def check_cookies():
     path = "/etc/secrets/cookies.txt"
     if not os.path.exists(path):
-        return jsonify({"status": "missing", "message": "cookies.txt not found at /etc/secrets/cookies.txt"})
+        return jsonify({"status": "missing"})
     size = os.path.getsize(path)
     if size == 0:
-        return jsonify({"status": "empty", "message": "cookies.txt exists but is empty"})
+        return jsonify({"status": "empty"})
     with open(path, 'r') as f:
         content = f.read()
-    youtube_lines = [l for l in content.splitlines() if 'youtube' in l.lower() or 'google' in l.lower()]
-    # Test copy to /tmp
+    yt_lines = [l for l in content.splitlines() if 'youtube' in l.lower()]
     try:
-        import shutil
         shutil.copy2(path, "/tmp/youtube_cookies.txt")
         copy_ok = True
-    except Exception as e:
+    except Exception:
         copy_ok = False
     return jsonify({
         "status": "ok",
         "file_size": size,
         "total_lines": len(content.splitlines()),
-        "youtube_lines": len(youtube_lines),
+        "youtube_lines": len(yt_lines),
         "copy_to_tmp": copy_ok,
-        "message": "Cookies ready" if youtube_lines and copy_ok else "WARNING: Check copy_to_tmp"
     })
 
-def get_ydl_opts_for_platform(platform):
-    """Return platform-specific yt-dlp options."""
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "extractor_args": {},
-    }
-    # TikTok — skip watermark
-    if platform == "tiktok":
-        opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
-    # YouTube — use tv_embedded client to bypass bot detection
-    if platform == "youtube":
-        opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["tv_embedded", "web_creator", "android"],
-                "skip": ["hls", "dash"],
-            }
-        }
-        opts["http_headers"] = {
-            "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
-        }
-    return opts
-
-
-@app.route("/", methods=["GET"])
-def index():
-    platforms = list(SUPPORTED_PLATFORMS.keys())
-    return jsonify({
-        "status": "NeoFly Downloader API",
-        "version": "3.0.0",
-        "supported_platforms": platforms
-    })
-
+@app.route("/debug-youtube", methods=["POST"])
+def debug_youtube():
+    data = request.get_json()
+    url  = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL required"}), 400
+    ydl_opts = {"quiet": False, "no_warnings": False, "skip_download": True}
+    ydl_opts.update(get_youtube_opts())
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return jsonify({"status": "success", "title": info.get("title"), "cookies_used": "cookiefile" in ydl_opts})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e), "cookies_used": "cookiefile" in ydl_opts})
 
 @app.route("/api/info", methods=["POST"])
 def get_info():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid request body"}), 400
-
     url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
-
     if not is_valid_url(url):
         supported = ", ".join(p.capitalize() for p in SUPPORTED_PLATFORMS.keys())
         return jsonify({"error": f"Unsupported platform. We support: {supported}"}), 400
 
     platform = get_platform(url)
-    ydl_opts = get_ydl_opts_for_platform(platform)
+    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+
     if platform == "youtube":
-        cookies = get_youtube_cookies()
-        if cookies:
-            ydl_opts["cookiefile"] = cookies
+        ydl_opts.update(get_youtube_opts())
+    elif platform == "tiktok":
+        ydl_opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        # Build quality options
         seen_heights = set()
         quality_options = []
-
         if info.get("formats"):
             for f in info["formats"]:
                 height = f.get("height")
@@ -221,64 +218,41 @@ def get_info():
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
         if "sign in" in msg or "bot" in msg:
-            cookies = get_youtube_cookies()
-            if not cookies:
-                return jsonify({"error": "YouTube requires cookies. Please add cookies.txt to Render Secret Files."}), 403
-            return jsonify({"error": "YouTube cookies expired or invalid. Please re-export and re-upload cookies.txt."}), 403
-        if "login" in msg or "private" in msg:
+            return jsonify({"error": "YouTube cookies expired. Please re-upload cookies.txt to Render."}), 403
+        if "private" in msg or "login" in msg:
             return jsonify({"error": "This video is private or requires login."}), 403
         if "copyright" in msg:
-            return jsonify({"error": "This video is not available due to copyright restrictions."}), 403
+            return jsonify({"error": "Video unavailable due to copyright."}), 403
         return jsonify({"error": "Could not fetch video. Make sure the URL is correct and public."}), 400
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
-
 
 @app.route("/api/download", methods=["POST"])
 def download_video():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid request body"}), 400
-
     url = data.get("url", "").strip()
     format_id = data.get("format_id", "best")
-
     if not url or not is_valid_url(url):
         return jsonify({"error": "Invalid or unsupported URL"}), 400
 
-    platform = get_platform(url)
-    file_id = str(uuid.uuid4())
-    output_template = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
+    platform  = get_platform(url)
+    file_id   = str(uuid.uuid4())
+    out_tmpl  = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
 
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "outtmpl": output_template,
+        "outtmpl": out_tmpl,
         "merge_output_format": "mp4",
     }
 
-    # Platform-specific opts
-    if platform == "tiktok":
-        ydl_opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
     if platform == "youtube":
-        ydl_opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["tv_embedded", "web_creator", "android"],
-                "skip": ["hls", "dash"],
-            }
-        }
-        ydl_opts["http_headers"] = {
-            "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
-        }
-        cookies = get_youtube_cookies()
-        if cookies:
-            ydl_opts["cookiefile"] = cookies
+        ydl_opts.update(get_youtube_opts())
+    elif platform == "tiktok":
+        ydl_opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
 
-    cookies = get_cookies()
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
-
-    # Format selection
     if format_id == "best" or not format_id:
         ydl_opts["format"] = "bestvideo+bestaudio/best"
     else:
@@ -306,8 +280,8 @@ def download_video():
         if not downloaded or not os.path.exists(downloaded):
             return jsonify({"error": "Download failed. File not found."}), 500
 
-        safe_title = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')[:60]
-        ext = downloaded.rsplit(".", 1)[-1]
+        safe_title   = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')[:60]
+        ext          = downloaded.rsplit(".", 1)[-1]
         download_name = f"{safe_title}.{ext}"
 
         return send_file(
@@ -319,12 +293,11 @@ def download_video():
 
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
-        if "login" in msg or "private" in msg:
+        if "private" in msg or "login" in msg:
             return jsonify({"error": "This video is private or requires login."}), 403
         return jsonify({"error": "Download failed. Make sure the video is public."}), 400
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
