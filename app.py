@@ -31,17 +31,17 @@ threading.Thread(target=cleanup_old_files, daemon=True).start()
 
 # ── Supported platforms ────────────────────────────────
 SUPPORTED_PLATFORMS = {
-    "facebook":   r"(https?://)?(www\.)?(facebook\.com|fb\.watch|fb\.com)/.*",
-    "instagram":  r"(https?://)?(www\.)?instagram\.com/(p|reel|tv|videos|stories)/.*",
-    "youtube":    r"(https?://)?(www\.|m\.)?(youtube\.com/(watch|shorts|embed|live)|youtu\.be)/.*",
-    "twitter":    r"(https?://)?(www\.|mobile\.)?(twitter\.com|x\.com)/.*/status/.*",
-    "tiktok":     r"(https?://)?(www\.|vm\.|vt\.)?tiktok\.com/.*",
-    "pinterest":  r"(https?://)?(www\.)?pinterest\.(com|co\.uk|in)/pin/.*",
-    "reddit":     r"(https?://)?(www\.|old\.)?reddit\.com/r/.*/comments/.*",
-    "vimeo":      r"(https?://)?(www\.)?vimeo\.com/.*",
-    "dailymotion":r"(https?://)?(www\.)?dailymotion\.com/video/.*",
-    "linkedin":   r"(https?://)?(www\.)?linkedin\.com/posts/.*",
-    "snapchat":   r"(https?://)?(www\.)?snapchat\.com/spotlight/.*",
+    "facebook":    r"https?://(www\.)?(facebook\.com|fb\.watch|fb\.com)/.+",
+    "instagram":   r"https?://(www\.)?instagram\.com/.+",
+    "youtube":     r"https?://((www\.|m\.)?youtube\.com|youtu\.be)/.+",
+    "twitter":     r"https?://((www\.|mobile\.)?twitter\.com|(www\.)?x\.com)/.+",
+    "tiktok":      r"https?://((www\.|vm\.|vt\.)?tiktok\.com)/.+",
+    "pinterest":   r"https?://(www\.)?pinterest\.(com|co\.uk|in)/.+",
+    "reddit":      r"https?://((www\.|old\.)?reddit\.com)/.+",
+    "vimeo":       r"https?://(www\.)?vimeo\.com/.+",
+    "dailymotion": r"https?://(www\.)?dailymotion\.com/.+",
+    "linkedin":    r"https?://(www\.)?linkedin\.com/.+",
+    "snapchat":    r"https?://(www\.)?snapchat\.com/.+",
 }
 
 def is_valid_url(url):
@@ -268,3 +268,4 @@ def download_video():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+        
