@@ -91,9 +91,17 @@ def get_ydl_opts_for_platform(platform):
     # TikTok — skip watermark
     if platform == "tiktok":
         opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
-    # YouTube — use android client to avoid bot detection
+    # YouTube — use tv_embedded client to bypass bot detection
     if platform == "youtube":
-        opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+        opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["tv_embedded", "web_creator", "android"],
+                "skip": ["hls", "dash"],
+            }
+        }
+        opts["http_headers"] = {
+            "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+        }
     return opts
 
 
@@ -211,7 +219,15 @@ def download_video():
     if platform == "tiktok":
         ydl_opts["extractor_args"] = {"tiktok": {"api_hostname": "api22-normal-c-useast2a.tiktokv.com"}}
     if platform == "youtube":
-        ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+        ydl_opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["tv_embedded", "web_creator", "android"],
+                "skip": ["hls", "dash"],
+            }
+        }
+        ydl_opts["http_headers"] = {
+            "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+        }
 
     cookies = get_cookies()
     if cookies:
@@ -268,4 +284,4 @@ def download_video():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-        
+    
