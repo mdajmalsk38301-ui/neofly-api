@@ -77,11 +77,44 @@ def get_platform(url):
     return "unknown"
 
 def get_youtube_cookies():
-    """Return cookies path only if file exists and has content."""
+    """Copy cookies from read-only secret to /tmp and return path."""
+    secret_path = "/etc/secrets/cookies.txt"
+    tmp_path    = "/tmp/youtube_cookies.txt"
+    if not os.path.exists(secret_path) or os.path.getsize(secret_path) == 0:
+        return None
+    try:
+        import shutil
+        shutil.copy2(secret_path, tmp_path)
+        return tmp_path
+    except Exception:
+        return None
+
+@app.route("/check-cookies", methods=["GET"])
+def check_cookies():
     path = "/etc/secrets/cookies.txt"
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        return path
-    return None
+    if not os.path.exists(path):
+        return jsonify({"status": "missing", "message": "cookies.txt not found at /etc/secrets/cookies.txt"})
+    size = os.path.getsize(path)
+    if size == 0:
+        return jsonify({"status": "empty", "message": "cookies.txt exists but is empty"})
+    with open(path, 'r') as f:
+        content = f.read()
+    youtube_lines = [l for l in content.splitlines() if 'youtube' in l.lower() or 'google' in l.lower()]
+    # Test copy to /tmp
+    try:
+        import shutil
+        shutil.copy2(path, "/tmp/youtube_cookies.txt")
+        copy_ok = True
+    except Exception as e:
+        copy_ok = False
+    return jsonify({
+        "status": "ok",
+        "file_size": size,
+        "total_lines": len(content.splitlines()),
+        "youtube_lines": len(youtube_lines),
+        "copy_to_tmp": copy_ok,
+        "message": "Cookies ready" if youtube_lines and copy_ok else "WARNING: Check copy_to_tmp"
+    })
 
 def get_ydl_opts_for_platform(platform):
     """Return platform-specific yt-dlp options."""
@@ -187,6 +220,11 @@ def get_info():
 
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
+        if "sign in" in msg or "bot" in msg:
+            cookies = get_youtube_cookies()
+            if not cookies:
+                return jsonify({"error": "YouTube requires cookies. Please add cookies.txt to Render Secret Files."}), 403
+            return jsonify({"error": "YouTube cookies expired or invalid. Please re-export and re-upload cookies.txt."}), 403
         if "login" in msg or "private" in msg:
             return jsonify({"error": "This video is private or requires login."}), 403
         if "copyright" in msg:
@@ -291,4 +329,3 @@ def download_video():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-        
