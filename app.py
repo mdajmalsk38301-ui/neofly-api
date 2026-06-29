@@ -76,9 +76,12 @@ def get_platform(url):
         return "snapchat"
     return "unknown"
 
-def get_cookies():
+def get_youtube_cookies():
+    """Return cookies path only if file exists and has content."""
     path = "/etc/secrets/cookies.txt"
-    return path if os.path.exists(path) else None
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return path
+    return None
 
 def get_ydl_opts_for_platform(platform):
     """Return platform-specific yt-dlp options."""
@@ -131,9 +134,10 @@ def get_info():
 
     platform = get_platform(url)
     ydl_opts = get_ydl_opts_for_platform(platform)
-    cookies = get_cookies()
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
+    if platform == "youtube":
+        cookies = get_youtube_cookies()
+        if cookies:
+            ydl_opts["cookiefile"] = cookies
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -228,6 +232,9 @@ def download_video():
         ydl_opts["http_headers"] = {
             "User-Agent": "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
         }
+        cookies = get_youtube_cookies()
+        if cookies:
+            ydl_opts["cookiefile"] = cookies
 
     cookies = get_cookies()
     if cookies:
@@ -284,4 +291,4 @@ def download_video():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    
+        
