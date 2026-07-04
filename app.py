@@ -441,14 +441,13 @@ def download_video():
             mimetype="video/mp4"
         )
 
-    except yt_dlp.utils.DownloadError as e:
+        except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
         if "private" in msg or "login" in msg:
             return jsonify({"error": "This video is private or requires login."}), 403
-        return jsonify({"error": "Download failed. Make sure the video is public."}), 400
-    except Exception as e:
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
-
+        # Change this line to return the exact yt-dlp error string
+        return jsonify({"error": f"Download failed: {str(e)}"}), 400
+    
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
