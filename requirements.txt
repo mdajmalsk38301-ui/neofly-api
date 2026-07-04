@@ -1,5 +1,4 @@
-Flask
+flask
 flask-cors
-yt-dlp>=2024.05.27
+yt-dlp
 gunicorn
-requests
