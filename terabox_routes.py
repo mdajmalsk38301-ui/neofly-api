@@ -1,21 +1,20 @@
 # terabox_routes.py
-# Add this to your existing neofly-api Flask app (app.py).
-# Requires: pip install terabox-gateway
+# Calls a running terabox-gateway instance over HTTP instead of importing
+# it as a library (it's a standalone Flask app, not a pip package with a
+# client class — that's what caused the ImportError).
 #
-# In requirements.txt add:
-#   terabox-gateway
+# No new dependency needed beyond `requests`, which yt-dlp already pulls in.
 
 from flask import Blueprint, request, jsonify
-from terabox_gateway import TeraboxClient
+import requests
 import os
 
 terabox_bp = Blueprint("terabox", __name__)
 
-# Optional: some private/limited-access links need a cookie.
-# Public share links usually work without one.
-TERABOX_COOKIE = os.environ.get("TERABOX_COOKIE", None)
-
-_client = TeraboxClient(cookie=TERABOX_COOKIE) if TERABOX_COOKIE else TeraboxClient()
+# Public demo instance of saahiyo/terabox-gateway. Fine for testing, but
+# it's shared/rate-limited by everyone using it. For production, deploy
+# your own copy to Vercel (see below) and point this at your own URL.
+GATEWAY_URL = os.environ.get("TERABOX_GATEWAY_URL", "https://tera-core.vercel.app")
 
 
 @terabox_bp.route("/api/terabox", methods=["GET"])
@@ -32,7 +31,7 @@ def extract_terabox():
           "size": "...",
           "thumbnail": "...",
           "download_link": "...",
-          "stream_link": "..."   # m3u8/HLS if available, else null
+          "stream_link": null
         }
       ]
     }
@@ -46,35 +45,52 @@ def extract_terabox():
         return jsonify({"status": "error", "message": "URL does not look like a TeraBox link"}), 400
 
     try:
-        result = _client.get_file_info(share_url)
+        resp = requests.get(
+            f"{GATEWAY_URL}/api2",
+            params={"url": share_url},
+            timeout=20,
+        )
+        data = resp.json()
+
+        # terabox-gateway's own response shape varies by version; handle
+        # both a top-level "files" list and a single-file dict gracefully.
+        raw_files = data.get("files") or ([data] if data.get("direct_link") else [])
 
         files = []
-        for f in result.get("files", []):
+        for f in raw_files:
             files.append({
-                "filename": f.get("filename"),
+                "filename": f.get("filename") or f.get("file_name"),
                 "size": f.get("size"),
-                "thumbnail": f.get("thumbnail"),
-                "download_link": f.get("download_link"),
-                "stream_link": f.get("hls_link") or None,
+                "thumbnail": f.get("thumbnail") or f.get("thumb"),
+                "download_link": f.get("direct_link") or f.get("download_link"),
+                "stream_link": f.get("stream_link"),
             })
 
-        if not files:
-            return jsonify({"status": "error", "message": "No playable files found in this link"}), 404
+        if not files or not files[0].get("download_link"):
+            return jsonify({
+                "status": "error",
+                "message": data.get("message") or "No playable files found in this link"
+            }), 404
 
         return jsonify({"status": "success", "files": files})
 
+    except requests.exceptions.RequestException as e:
+        print(f"[terabox] gateway request failed: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Could not reach the TeraBox extraction service. Try again shortly."
+        }), 502
+    except ValueError:
+        # response wasn't valid JSON
+        print(f"[terabox] gateway returned non-JSON: {resp.text[:200]}")
+        return jsonify({
+            "status": "error",
+            "message": "TeraBox service returned an unexpected response."
+        }), 502
     except Exception as e:
-        # Common failure modes: expired share link, token/cookie rejected by
-        # TeraBox, or their API shape changed. Log e server-side and keep
-        # the client message generic.
         print(f"[terabox] extraction failed: {e}")
         return jsonify({
             "status": "error",
-            "message": "Could not process this TeraBox link. It may be private, expired, or TeraBox changed something on their end."
+            "message": "Could not process this TeraBox link. It may be private, expired, or invalid."
         }), 502
-
-
-# In your main app.py, register this blueprint:
-#
-#   from terabox_routes import terabox_bp
-#   app.register_blueprint(terabox_bp)
+        
