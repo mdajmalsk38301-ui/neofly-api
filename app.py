@@ -7,6 +7,7 @@ import threading
 import time
 import re
 import shutil
+from terabox_routes import terabox_bp
 
 app = Flask(__name__)
 CORS(app, origins=[
