@@ -16,6 +16,8 @@ CORS(app, origins=[
     "https://www.theneofly.in"
 ])
 
+app.register_blueprint(terabox_bp)
+
 DOWNLOAD_DIR = "/tmp/neofly_downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -120,7 +122,7 @@ def index():
     return jsonify({
         "status":              "NeoFly Downloader API",
         "version":             "6.0.0",
-        "supported_platforms": list(SUPPORTED_PLATFORMS.keys()),
+        "supported_platforms": list(SUPPORTED_PLATFORMS.keys()) + ["terabox"],
         "yt_dlp_version":      yt_dlp.version.__version__,
     })
 
