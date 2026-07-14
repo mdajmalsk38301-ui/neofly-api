@@ -7,7 +7,6 @@ import threading
 import time
 import re
 import shutil
-from terabox_routes import terabox_bp
 
 app = Flask(__name__)
 CORS(app, origins=[
@@ -16,12 +15,9 @@ CORS(app, origins=[
     "https://www.theneofly.in"
 ])
 
-app.register_blueprint(terabox_bp)
-
 DOWNLOAD_DIR = "/tmp/neofly_downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ── Auto cleanup files older than 10 mins ─────────────
 def cleanup_old_files():
     while True:
         time.sleep(300)
@@ -36,7 +32,6 @@ def cleanup_old_files():
 
 threading.Thread(target=cleanup_old_files, daemon=True).start()
 
-# ── Supported platforms (YouTube removed) ─────────────
 SUPPORTED_PLATFORMS = {
     "facebook":    r"https?://(www\.)?(facebook\.com|fb\.watch|fb\.com)/.+",
     "instagram":   r"https?://(www\.)?instagram\.com/.+",
@@ -51,7 +46,6 @@ SUPPORTED_PLATFORMS = {
 }
 
 def is_valid_url(url):
-    # Block YouTube explicitly with a clear message
     url_lower = url.lower()
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
         return "youtube"
@@ -122,7 +116,7 @@ def index():
     return jsonify({
         "status":              "NeoFly Downloader API",
         "version":             "6.0.0",
-        "supported_platforms": list(SUPPORTED_PLATFORMS.keys()) + ["terabox"],
+        "supported_platforms": list(SUPPORTED_PLATFORMS.keys()),
         "yt_dlp_version":      yt_dlp.version.__version__,
     })
 
@@ -132,30 +126,21 @@ def get_info():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid request body"}), 400
-
     url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
-
-    # YouTube — friendly error with redirect
     url_lower = url.lower()
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
-        return jsonify({
-            "error": "YouTube downloads are currently unavailable on our server. Please use cobalt.tools or yt1s.com for YouTube videos."
-        }), 400
-
+        return jsonify({"error": "YouTube downloads are currently unavailable. Please use cobalt.tools or yt1s.com."}), 400
     valid = is_valid_url(url)
     if not valid or valid == "youtube":
         supported = ", ".join(p.capitalize() for p in SUPPORTED_PLATFORMS.keys())
         return jsonify({"error": f"Unsupported platform. We support: {supported}"}), 400
-
     platform = get_platform(url)
     ydl_opts = get_ydl_opts(platform, skip_download=True)
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
         return jsonify({
             "title":     info.get("title", "Video"),
             "thumbnail": info.get("thumbnail"),
@@ -164,7 +149,6 @@ def get_info():
             "uploader":  info.get("uploader") or info.get("channel"),
             "formats":   build_formats(info),
         })
-
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
         if "private" in msg or "login" in msg:
@@ -181,29 +165,19 @@ def download_video():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid request body"}), 400
-
     url       = data.get("url", "").strip()
     format_id = data.get("format_id", "best")
-
-    # YouTube — friendly error
     url_lower = url.lower()
     if "youtube.com" in url_lower or "youtu.be" in url_lower:
-        return jsonify({
-            "error": "YouTube downloads are currently unavailable. Please use cobalt.tools or yt1s.com."
-        }), 400
-
+        return jsonify({"error": "YouTube downloads are currently unavailable. Please use cobalt.tools or yt1s.com."}), 400
     if not url or not is_valid_url(url):
         return jsonify({"error": "Invalid or unsupported URL"}), 400
-
     platform = get_platform(url)
     file_id  = str(uuid.uuid4())
     out_tmpl = os.path.join(DOWNLOAD_DIR, f"{file_id}.%(ext)s")
-
     ydl_opts = get_ydl_opts(platform, skip_download=False)
     ydl_opts["outtmpl"]            = out_tmpl
     ydl_opts["merge_output_format"] = "mp4"
-
-    # Format selection
     if format_id == "best" or not format_id:
         ydl_opts["format"] = "bestvideo+bestaudio/best"
     else:
@@ -216,32 +190,26 @@ def download_video():
             )
         except ValueError:
             ydl_opts["format"] = "bestvideo+bestaudio/best"
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info  = ydl.extract_info(url, download=True)
             title = info.get("title", "video")
-
         downloaded = None
         for f in os.listdir(DOWNLOAD_DIR):
             if f.startswith(file_id):
                 downloaded = os.path.join(DOWNLOAD_DIR, f)
                 break
-
         if not downloaded or not os.path.exists(downloaded):
             return jsonify({"error": "Download failed. File not found after processing."}), 500
-
         safe_title    = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')[:60]
         ext           = downloaded.rsplit(".", 1)[-1]
         download_name = f"{safe_title}.{ext}"
-
         return send_file(
             downloaded,
             as_attachment=True,
             download_name=download_name,
             mimetype="video/mp4"
         )
-
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).lower()
         if "private" in msg or "login" in msg:
@@ -254,4 +222,3 @@ def download_video():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-        
